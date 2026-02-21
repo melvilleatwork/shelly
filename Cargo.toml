@@ -1,0 +1,15 @@
+[package]
+name = "shelly"
+version = "0.1.0"
+edition = "2024"
+description = "Translate natural language into shell commands using AI"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "6"
+tokio = { version = "1", features = ["full"] }
+colored = "3"
