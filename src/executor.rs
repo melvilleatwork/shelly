@@ -11,9 +11,11 @@ pub fn execute(shell_cmd: &ShellCommand) -> Result<(), String> {
         return Ok(());
     }
 
-    // Show the command and explanation
-    println!("{} {}", "▶".green().bold(), shell_cmd.command.bold());
-    println!("{} {}", "ℹ".blue(), shell_cmd.explanation.dimmed());
+    // Show the command and explanation prominently
+    println!();
+    println!("  {} {}", "Command:".cyan().bold(), shell_cmd.command.white().bold());
+    println!("  {} {}", "Reason: ".cyan(), shell_cmd.explanation.dimmed());
+    println!();
 
     // If risky, ask for confirmation
     if shell_cmd.is_risky() {
@@ -34,8 +36,6 @@ pub fn execute(shell_cmd: &ShellCommand) -> Result<(), String> {
             return Ok(());
         }
     }
-
-    println!();
 
     // Execute the command
     let shell = if cfg!(windows) { "cmd" } else { "sh" };
