@@ -130,3 +130,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ## License
 
 [MIT](LICENSE)
+
+## Acknowledgements
+
+This project was built with the help of AI coding agents — code, tests, CI, and docs were drafted with AI assistance and reviewed by a human.
+
