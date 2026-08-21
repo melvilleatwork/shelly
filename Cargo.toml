@@ -17,6 +17,47 @@ path = "src/main.rs"
 lto = true
 strip = true
 codegen-units = 1
+# Runtime backstop for Gate 4: trap overflow instead of wrapping silently.
+overflow-checks = true
+
+# Hardening gates. Production allowlist for suppressions (narrow #[expect(reason=...)] only):
+#   - arithmetic_side_effects: f64/f32 float math only
+#   - indexing_slicing: constant indices into fixed-size arrays, provably in bounds
+#   - as_conversions / cast_*: deliberate, documented conversions only
+[lints.rust]
+warnings = "deny"
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+# Gate 3: no hidden panics in non-test code.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+unwrap_in_result = "deny"
+# Gate 4: no silently-overflowing arithmetic.
+arithmetic_side_effects = "deny"
+# Gate 5: don't drop must-use results.
+let_underscore_must_use = "deny"
+# Casts: force From/TryFrom so lossy casts can't hide.
+as_conversions = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+cast_lossless = "warn"
+# Float foot-guns.
+float_cmp = "deny"
+lossy_float_literal = "deny"
+# Suppression hygiene.
+allow_attributes = "warn"
+allow_attributes_without_reason = "deny"
+# Raise the floor (priority -1 so the specific denies above win).
+pedantic = { level = "warn", priority = -1 }
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

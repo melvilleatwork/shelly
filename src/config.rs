@@ -144,6 +144,7 @@ api_key = "YOUR_API_KEY_HERE"      # or set SHELLY_API_KEY / OPENAI_API_KEY / AN
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

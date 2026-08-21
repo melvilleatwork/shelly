@@ -33,7 +33,9 @@ pub fn execute(shell_cmd: &ShellCommand, dry_run: bool) -> Result<(), String> {
             "⚠ This command is potentially destructive.".yellow().bold()
         );
         print!("Run it? [y/N] ");
-        io::stdout().flush().unwrap();
+        io::stdout()
+            .flush()
+            .map_err(|e| format!("Failed to flush stdout: {e}"))?;
 
         let mut input = String::new();
         io::stdin()
