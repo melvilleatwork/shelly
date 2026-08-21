@@ -89,6 +89,10 @@ pub async fn ask_llm(config: &Config, question: &str) -> Result<ShellCommand, St
         .and_then(|c| c.message.content.as_ref())
         .ok_or("No response from OpenAI")?;
 
+    parse_response(content)
+}
+
+pub fn parse_response(content: &str) -> Result<ShellCommand, String> {
     // Strip markdown fences if present
     let clean = content
         .trim()
@@ -97,8 +101,62 @@ pub async fn ask_llm(config: &Config, question: &str) -> Result<ShellCommand, St
         .unwrap_or(content.trim());
     let clean = clean.strip_suffix("```").unwrap_or(clean).trim();
 
-    let shell_cmd: ShellCommand = serde_json::from_str(clean)
-        .map_err(|e| format!("Failed to parse LLM response as JSON: {e}\nRaw response: {content}"))?;
+    let shell_cmd: ShellCommand = serde_json::from_str(clean).map_err(|e| {
+        format!("Failed to parse LLM response as JSON: {e}\nRaw response: {content}")
+    })?;
 
     Ok(shell_cmd)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_plain_json() {
+        let cmd =
+            parse_response(r#"{"command": "ls -la", "explanation": "list files", "risk": "safe"}"#)
+                .unwrap();
+        assert_eq!(cmd.command, "ls -la");
+        assert_eq!(cmd.explanation, "list files");
+        assert!(!cmd.is_risky());
+    }
+
+    #[test]
+    fn parses_fenced_json() {
+        let cmd = parse_response(
+            "```json\n{\"command\": \"rm -rf /tmp/x\", \"explanation\": \"delete\", \"risk\": \"risky\"}\n```",
+        )
+        .unwrap();
+        assert_eq!(cmd.command, "rm -rf /tmp/x");
+        assert!(cmd.is_risky());
+    }
+
+    #[test]
+    fn parses_fenced_without_language_tag() {
+        let cmd = parse_response(
+            "```\n{\"command\": \"df -h\", \"explanation\": \"disk usage\", \"risk\": \"safe\"}\n```",
+        )
+        .unwrap();
+        assert_eq!(cmd.command, "df -h");
+    }
+
+    #[test]
+    fn rejects_invalid_json() {
+        assert!(parse_response("not json at all").is_err());
+    }
+
+    #[test]
+    fn rejects_missing_fields() {
+        assert!(parse_response(r#"{"command": "ls"}"#).is_err());
+    }
+
+    #[test]
+    fn empty_command_is_not_risky() {
+        let cmd =
+            parse_response(r#"{"command": "", "explanation": "cannot be done", "risk": "safe"}"#)
+                .unwrap();
+        assert_eq!(cmd.command, "");
+        assert!(!cmd.is_risky());
+    }
 }

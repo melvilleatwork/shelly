@@ -32,12 +32,24 @@ Rules:
 }
 
 fn detect_shell() -> String {
-    env::var("SHELL")
-        .unwrap_or_else(|_| {
-            if cfg!(windows) {
-                "cmd.exe".to_string()
-            } else {
-                "/bin/sh".to_string()
-            }
-        })
+    env::var("SHELL").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            "cmd.exe".to_string()
+        } else {
+            "/bin/sh".to_string()
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_includes_os_and_shell() {
+        let prompt = build_system_prompt();
+        assert!(prompt.contains(env::consts::OS));
+        assert!(prompt.contains(&detect_shell()));
+        assert!(prompt.contains("\"risk\""));
+    }
 }

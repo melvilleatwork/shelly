@@ -1,8 +1,22 @@
 [package]
-name = "shelly"
+name = "shellysh"
 version = "0.1.0"
 edition = "2024"
 description = "Translate natural language into shell commands using AI"
+license = "MIT"
+repository = "https://github.com/graememelville/shelly"
+homepage = "https://github.com/graememelville/shelly"
+keywords = ["cli", "shell", "ai", "openai", "terminal"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "shelly"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

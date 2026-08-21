@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use crate::llm::ShellCommand;
 
-pub fn execute(shell_cmd: &ShellCommand) -> Result<(), String> {
+pub fn execute(shell_cmd: &ShellCommand, dry_run: bool) -> Result<(), String> {
     if shell_cmd.command.is_empty() {
         println!("{}", shell_cmd.explanation.yellow());
         return Ok(());
@@ -13,9 +13,18 @@ pub fn execute(shell_cmd: &ShellCommand) -> Result<(), String> {
 
     // Show the command and explanation prominently
     println!();
-    println!("  {} {}", "Command:".cyan().bold(), shell_cmd.command.white().bold());
+    println!(
+        "  {} {}",
+        "Command:".cyan().bold(),
+        shell_cmd.command.white().bold()
+    );
     println!("  {} {}", "Reason: ".cyan(), shell_cmd.explanation.dimmed());
     println!();
+
+    if dry_run {
+        println!("{}", "Dry run: command not executed.".dimmed());
+        return Ok(());
+    }
 
     // If risky, ask for confirmation
     if shell_cmd.is_risky() {
@@ -49,10 +58,7 @@ pub fn execute(shell_cmd: &ShellCommand) -> Result<(), String> {
 
     if !status.success() {
         let code = status.code().unwrap_or(-1);
-        println!(
-            "\n{}",
-            format!("Command exited with code {code}").red()
-        );
+        println!("\n{}", format!("Command exited with code {code}").red());
     }
 
     Ok(())
