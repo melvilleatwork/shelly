@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bring-your-own-provider support: any OpenAI-compatible endpoint via `base_url`, plus native Anthropic support.
+- Provider selection via `provider` config field or inference from `base_url`.
+- `ANTHROPIC_API_KEY` environment variable support.
+- Local model support via Ollama (no API key required).
+
+### Changed
+
+- Config file format moved from `[openai]` to `[provider]` section with `base_url` and `model` fields.
+
 ## [0.1.0] - 2026-08-21
 
 ### Added
