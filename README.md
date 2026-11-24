@@ -16,6 +16,7 @@ $ shelly "what's my wifi ip address?"
 ## Why Shelly?
 
 - **No more memorizing flags.** "how much disk space do I have?" just works.
+- **Bring your own provider.** OpenAI, Anthropic, Groq, DeepSeek, Mistral, OpenRouter — or fully local models via Ollama.
 - **OS-aware.** Knows whether you're on macOS, Linux, or Windows and picks the right command.
 - **Safe by default.** Read-only commands run automatically; anything destructive (`rm`, `sudo`, `kill`, ...) requires explicit confirmation.
 - **Fast and tiny.** A single static binary written in Rust.
@@ -50,17 +51,20 @@ cargo install --path .
 
 ## Configuration
 
-Shelly needs an [OpenAI API key](https://platform.openai.com/api-keys). Two ways to provide it:
+Shelly is **bring-your-own-key** and works with any OpenAI-compatible provider, plus Anthropic natively.
 
-**Option 1 — environment variable (recommended):**
+Set an API key via environment variable:
 
 ```bash
-export SHELLY_API_KEY="sk-..."   # OPENAI_API_KEY also works
+export SHELLY_API_KEY="sk-..."    # works for any provider
+# or provider-specific:
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-**Option 2 — config file:**
+With no config, Shelly uses OpenAI, or Anthropic if `ANTHROPIC_API_KEY` is the only key set. `SHELLY_API_KEY` takes precedence over the provider-specific variables but does not choose a provider; set that in the config file.
 
-On first run, Shelly creates a config file at:
+Or use a config file. On first run, Shelly creates one at:
 
 | OS      | Path                                               |
 |---------|----------------------------------------------------|
@@ -68,13 +72,27 @@ On first run, Shelly creates a config file at:
 | Linux   | `~/.config/shelly/config.toml`                     |
 | Windows | `%APPDATA%\shelly\config.toml`                     |
 
-Edit it:
-
 ```toml
-[openai]
+[provider]
+# provider = "openai"     # "openai" or "anthropic" (inferred when omitted)
 api_key = "sk-..."
-# model = "gpt-4o-mini"   # optional, defaults to gpt-4o-mini
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-4o-mini"
 ```
+
+### Supported providers
+
+| Provider  | `provider`        | `base_url`                              | Example model              |
+|-----------|-------------------|------------------------------------------|----------------------------|
+| OpenAI    | `openai`          | *(default)*                              | `gpt-4o-mini`              |
+| Anthropic | `anthropic`       | *(default)*                              | `claude-sonnet-4-5`        |
+| Groq      | `openai`          | `https://api.groq.com/openai/v1`         | `llama-3.3-70b-versatile`  |
+| DeepSeek  | `openai`          | `https://api.deepseek.com/v1`            | `deepseek-chat`            |
+| Mistral   | `openai`          | `https://api.mistral.ai/v1`              | `mistral-large-latest`     |
+| OpenRouter| `openai`          | `https://openrouter.ai/api/v1`           | any OpenRouter model       |
+| Ollama    | `openai`          | `http://localhost:11434/v1`              | e.g. `llama3.2`            |
+
+Local models via [Ollama](https://ollama.com) need no API key at all — just point `base_url` at your local instance. (With a custom `base_url`, Shelly sends no auth header if no key is set.)
 
 ## Usage
 
@@ -97,8 +115,10 @@ shelly "how many local time machine snapshots do I have?"
 Shelly classifies every command before running it:
 
 - **Safe** (read-only, non-destructive) runs automatically.
-- **Risky** (`rm`, `sudo`, `kill`, `dd`, `shutdown`, ...) shows a confirmation prompt first.
+- **Risky** (`rm`, `sudo`, `kill`, `dd`, `shutdown`, ...) shows a confirmation prompt first, as does any command not explicitly classified as safe.
 - Not sure? Use `--dry-run` to preview without executing.
+
+Commands run through `sh -c` (`cmd /C` on Windows), and Shelly exits with the command's exit code.
 
 ## Development
 
@@ -114,3 +134,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ## License
 
 [MIT](LICENSE)
+
+## Acknowledgements
+
+This project was built with the help of AI coding agents — code, tests, CI, and docs were drafted with AI assistance and reviewed by a human.
+

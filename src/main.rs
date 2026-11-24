@@ -39,9 +39,12 @@ async fn main() {
         Ok(shell_cmd) => {
             // Clear the "Thinking..." line
             print!("\x1b[1A\x1b[2K");
-            if let Err(e) = executor::execute(&shell_cmd, cli.dry_run) {
-                eprintln!("{} {e}", "Error:".red().bold());
-                std::process::exit(1);
+            match executor::execute(&shell_cmd, cli.dry_run) {
+                Ok(code) => std::process::exit(code),
+                Err(e) => {
+                    eprintln!("{} {e}", "Error:".red().bold());
+                    std::process::exit(1);
+                }
             }
         }
         Err(e) => {
