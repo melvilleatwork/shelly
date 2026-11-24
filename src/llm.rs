@@ -1,4 +1,4 @@
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, ProviderKind};
@@ -66,8 +66,9 @@ pub struct ShellCommand {
 }
 
 impl ShellCommand {
+    /// Fails closed: anything the model does not explicitly label "safe" needs confirmation.
     pub fn is_risky(&self) -> bool {
-        self.risk.to_lowercase() == "risky"
+        !self.risk.eq_ignore_ascii_case("safe")
     }
 }
 
@@ -81,6 +82,17 @@ pub async fn ask_llm(config: &Config, question: &str) -> Result<ShellCommand, St
     };
 
     parse_response(&content)
+}
+
+/// Adds the provider's auth header, or none when no key is configured.
+fn with_auth(request: RequestBuilder, config: &Config) -> RequestBuilder {
+    match (&config.api_key, config.kind) {
+        (None, _) => request,
+        (Some(key), ProviderKind::OpenAi) => {
+            request.header("Authorization", format!("Bearer {key}"))
+        }
+        (Some(key), ProviderKind::Anthropic) => request.header("x-api-key", key),
+    }
 }
 
 async fn ask_openai(
@@ -104,16 +116,17 @@ async fn ask_openai(
         temperature: 0.0,
     };
 
-    let response = client
-        .post(format!("{}/chat/completions", config.base_url))
-        .header("Authorization", format!("Bearer {}", config.api_key))
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to call API: {e}"))?;
+    let response = with_auth(
+        client.post(format!("{}/chat/completions", config.base_url)),
+        config,
+    )
+    .json(&request)
+    .send()
+    .await
+    .map_err(|e| format!("Failed to call API: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(await_api_error(response, "API").await);
+        return Err(await_api_error(response, "API", config).await);
     }
 
     let chat_response: OpenAiResponse = response
@@ -145,9 +158,7 @@ async fn ask_anthropic(
         }],
     };
 
-    let response = client
-        .post(format!("{}/messages", config.base_url))
-        .header("x-api-key", &config.api_key)
+    let response = with_auth(client.post(format!("{}/messages", config.base_url)), config)
         .header("anthropic-version", "2023-06-01")
         .json(&request)
         .send()
@@ -155,7 +166,7 @@ async fn ask_anthropic(
         .map_err(|e| format!("Failed to call Anthropic API: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(await_api_error(response, "Anthropic API").await);
+        return Err(await_api_error(response, "Anthropic API", config).await);
     }
 
     let anthropic_response: AnthropicResponse = response
@@ -176,10 +187,22 @@ fn extract_anthropic_text(response: &AnthropicResponse) -> Option<String> {
         .cloned()
 }
 
-async fn await_api_error(response: reqwest::Response, label: &str) -> String {
+async fn await_api_error(response: reqwest::Response, label: &str, config: &Config) -> String {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    format!("{label} error ({status}): {body}")
+    let hint = missing_key_hint(status, config).unwrap_or_default();
+    format!("{label} error ({status}): {body}{hint}")
+}
+
+/// Explains an auth failure when the request was sent without a key.
+fn missing_key_hint(status: StatusCode, config: &Config) -> Option<String> {
+    let auth_failed = matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN);
+    (auth_failed && config.api_key.is_none()).then(|| {
+        format!(
+            "\nNo API key found. Set SHELLY_API_KEY or {}, or add your API key to the config file.",
+            config.kind.provider_env_var()
+        )
+    })
 }
 
 pub fn parse_response(content: &str) -> Result<ShellCommand, String> {
@@ -249,6 +272,82 @@ mod tests {
                 .unwrap();
         assert_eq!(cmd.command, "");
         assert!(!cmd.is_risky());
+    }
+
+    #[test]
+    fn hints_at_missing_key_only_on_auth_failure_without_key() {
+        let hint = |status, key: Option<&str>| {
+            let config = Config {
+                kind: ProviderKind::OpenAi,
+                api_key: key.map(str::to_string),
+                base_url: String::new(),
+                model: String::new(),
+            };
+            missing_key_hint(status, &config)
+        };
+
+        for status in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
+            assert!(hint(status, None).unwrap().contains("OPENAI_API_KEY"));
+            assert_eq!(hint(status, Some("k")), None);
+        }
+        assert_eq!(hint(StatusCode::NOT_FOUND, None), None);
+    }
+
+    #[test]
+    fn auth_header_matches_provider_and_is_omitted_without_key() {
+        let auth_headers = |kind, key: Option<&str>| {
+            let config = Config {
+                kind,
+                api_key: key.map(str::to_string),
+                base_url: String::new(),
+                model: String::new(),
+            };
+            let request = with_auth(Client::new().post("http://localhost/"), &config)
+                .build()
+                .unwrap();
+            ["authorization", "x-api-key"].map(|name| {
+                request
+                    .headers()
+                    .get(name)
+                    .map(|value| value.to_str().unwrap().to_string())
+            })
+        };
+
+        for kind in [ProviderKind::OpenAi, ProviderKind::Anthropic] {
+            assert_eq!(auth_headers(kind, None), [None, None]);
+        }
+        assert_eq!(
+            auth_headers(ProviderKind::OpenAi, Some("k")),
+            [Some("Bearer k".to_string()), None]
+        );
+        assert_eq!(
+            auth_headers(ProviderKind::Anthropic, Some("k")),
+            [None, Some("k".to_string())]
+        );
+    }
+
+    #[test]
+    fn only_safe_label_skips_confirmation() {
+        let with_risk = |risk: &str| ShellCommand {
+            command: "true".to_string(),
+            explanation: String::new(),
+            risk: risk.to_string(),
+        };
+
+        for risk in ["safe", "Safe", "SAFE"] {
+            assert!(!with_risk(risk).is_risky(), "{risk:?} should be safe");
+        }
+        for risk in [
+            "risky",
+            "RISKY",
+            "destructive",
+            "high",
+            "unsafe",
+            "unknown",
+            "",
+        ] {
+            assert!(with_risk(risk).is_risky(), "{risk:?} should be risky");
+        }
     }
 
     #[test]

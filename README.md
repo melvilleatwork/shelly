@@ -62,6 +62,8 @@ export OPENAI_API_KEY="sk-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+With no config, Shelly uses OpenAI, or Anthropic if `ANTHROPIC_API_KEY` is the only key set. `SHELLY_API_KEY` takes precedence over the provider-specific variables but does not choose a provider; set that in the config file.
+
 Or use a config file. On first run, Shelly creates one at:
 
 | OS      | Path                                               |
@@ -72,7 +74,7 @@ Or use a config file. On first run, Shelly creates one at:
 
 ```toml
 [provider]
-# provider = "openai"     # "openai" or "anthropic" (inferred from base_url when omitted)
+# provider = "openai"     # "openai" or "anthropic" (inferred when omitted)
 api_key = "sk-..."
 # base_url = "https://api.openai.com/v1"
 # model = "gpt-4o-mini"
@@ -90,7 +92,7 @@ api_key = "sk-..."
 | OpenRouter| `openai`          | `https://openrouter.ai/api/v1`           | any OpenRouter model       |
 | Ollama    | `openai`          | `http://localhost:11434/v1`              | e.g. `llama3.2`            |
 
-Local models via [Ollama](https://ollama.com) need no API key at all — just point `base_url` at your local instance.
+Local models via [Ollama](https://ollama.com) need no API key at all — just point `base_url` at your local instance. (With a custom `base_url`, Shelly sends no auth header if no key is set.)
 
 ## Usage
 
@@ -113,8 +115,10 @@ shelly "how many local time machine snapshots do I have?"
 Shelly classifies every command before running it:
 
 - **Safe** (read-only, non-destructive) runs automatically.
-- **Risky** (`rm`, `sudo`, `kill`, `dd`, `shutdown`, ...) shows a confirmation prompt first.
+- **Risky** (`rm`, `sudo`, `kill`, `dd`, `shutdown`, ...) shows a confirmation prompt first, as does any command not explicitly classified as safe.
 - Not sure? Use `--dry-run` to preview without executing.
+
+Commands run through `sh -c` (`cmd /C` on Windows), and Shelly exits with the command's exit code.
 
 ## Development
 

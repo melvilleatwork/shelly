@@ -1,7 +1,10 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+const SHELLY_KEY_VAR: &str = "SHELLY_API_KEY";
+const PLACEHOLDER_KEY: &str = "YOUR_API_KEY_HERE";
 
 #[derive(Deserialize, Default)]
 struct ConfigFile {
@@ -54,7 +57,7 @@ impl ProviderKind {
         }
     }
 
-    fn provider_env_var(self) -> &'static str {
+    pub fn provider_env_var(self) -> &'static str {
         match self {
             Self::OpenAi => "OPENAI_API_KEY",
             Self::Anthropic => "ANTHROPIC_API_KEY",
@@ -64,7 +67,8 @@ impl ProviderKind {
 
 pub struct Config {
     pub kind: ProviderKind,
-    pub api_key: String,
+    /// `None` only for a custom `base_url`, where the endpoint may not need a key (e.g. Ollama).
+    pub api_key: Option<String>,
     pub base_url: String,
     pub model: String,
 }
@@ -84,22 +88,51 @@ impl Config {
             ProviderConfig::default()
         };
 
-        // Resolve provider kind: explicit setting > inference from base_url > openai
-        let base_url = file.base_url.clone().unwrap_or_default();
-        let kind = ProviderKind::detect(file.provider.as_deref().unwrap_or(""), &base_url)?;
+        Self::resolve(file, &|name| std::env::var(name).ok(), &path)
+    }
+
+    /// Pure resolution step, with the environment injected so it can be tested.
+    fn resolve(
+        file: ProviderConfig,
+        env: &dyn Fn(&str) -> Option<String>,
+        path: &Path,
+    ) -> Result<Self, String> {
+        let env_key = |name: &str| usable_key(env(name));
+        let provider = file.provider.unwrap_or_default();
+        let base_url = file.base_url.unwrap_or_default();
+        let shelly_key = env_key(SHELLY_KEY_VAR);
+        let file_key = usable_key(file.api_key);
+
+        // Provider kind: explicit setting > inference from base_url > ANTHROPIC_API_KEY being
+        // the only key available > openai
+        let unspecified = provider.is_empty() && base_url.is_empty();
+        let only_anthropic_key = shelly_key.is_none()
+            && file_key.is_none()
+            && env_key(ProviderKind::OpenAi.provider_env_var()).is_none()
+            && env_key(ProviderKind::Anthropic.provider_env_var()).is_some();
+        let kind = if unspecified && only_anthropic_key {
+            ProviderKind::Anthropic
+        } else {
+            ProviderKind::detect(&provider, &base_url)?
+        };
 
         // Key resolution: SHELLY_API_KEY > provider-specific env var > config file
-        let api_key = std::env::var("SHELLY_API_KEY")
-            .or_else(|_| std::env::var(kind.provider_env_var()))
-            .ok()
-            .filter(|k| !k.is_empty())
-            .or(file.api_key)
-            .unwrap_or_default();
+        let api_key = shelly_key
+            .or_else(|| env_key(kind.provider_env_var()))
+            .or(file_key);
 
-        if api_key.is_empty() || api_key == "YOUR_API_KEY_HERE" {
+        if api_key.is_none() && base_url.is_empty() {
+            let vars = if unspecified {
+                format!(
+                    "{SHELLY_KEY_VAR}, {} or {}",
+                    ProviderKind::OpenAi.provider_env_var(),
+                    ProviderKind::Anthropic.provider_env_var()
+                )
+            } else {
+                format!("{SHELLY_KEY_VAR} or {}", kind.provider_env_var())
+            };
             return Err(format!(
-                "No API key found. Set SHELLY_API_KEY or {}, or add your API key to {}",
-                kind.provider_env_var(),
+                "No API key found. Set {vars}, or add your API key to {}",
                 path.display()
             ));
         }
@@ -130,9 +163,9 @@ impl Config {
         }
 
         let default_config = r#"[provider]
-# provider = "openai"              # "openai" or "anthropic"; inferred from base_url when omitted
+# provider = "openai"              # "openai" or "anthropic"; inferred when omitted
 api_key = "YOUR_API_KEY_HERE"      # or set SHELLY_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
-# base_url = "https://api.openai.com/v1"   # any OpenAI-compatible endpoint works
+# base_url = "https://api.openai.com/v1"   # any OpenAI-compatible endpoint; key optional when set
 # model = "gpt-4o-mini"
 "#;
 
@@ -141,6 +174,11 @@ api_key = "YOUR_API_KEY_HERE"      # or set SHELLY_API_KEY / OPENAI_API_KEY / AN
 
         Ok(())
     }
+}
+
+/// Treats blank values and the default-config placeholder as "not set".
+fn usable_key(key: Option<String>) -> Option<String> {
+    key.filter(|k| !k.trim().is_empty() && k != PLACEHOLDER_KEY)
 }
 
 #[cfg(test)]
@@ -189,5 +227,89 @@ mod tests {
         );
         assert!(!ProviderKind::OpenAi.default_model().is_empty());
         assert!(!ProviderKind::Anthropic.default_model().is_empty());
+    }
+
+    fn resolve(file: &str, env: &[(&str, &str)]) -> Result<Config, String> {
+        let file: ConfigFile =
+            toml::from_str(&format!("[provider]\n{file}")).map_err(|e| e.to_string())?;
+        let lookup = |name: &str| {
+            env.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        };
+        Config::resolve(
+            file.provider.unwrap_or_default(),
+            &lookup,
+            Path::new("config.toml"),
+        )
+    }
+
+    #[test]
+    fn lone_anthropic_key_selects_anthropic() {
+        for file in ["", "api_key = \"YOUR_API_KEY_HERE\"", "api_key = \"\""] {
+            let env = [("ANTHROPIC_API_KEY", "ant"), ("OPENAI_API_KEY", "")];
+            let config = resolve(file, &env).unwrap();
+            assert_eq!(config.kind, ProviderKind::Anthropic);
+            assert_eq!(config.api_key.as_deref(), Some("ant"));
+            assert_eq!(config.base_url, "https://api.anthropic.com/v1");
+            assert_eq!(config.model, ProviderKind::Anthropic.default_model());
+        }
+    }
+
+    #[test]
+    fn anthropic_key_does_not_override_other_choices() {
+        let ant = ("ANTHROPIC_API_KEY", "ant");
+        let cases = [
+            ("api_key = \"file\"", vec![ant], Some("file")),
+            ("", vec![ant, ("OPENAI_API_KEY", "oai")], Some("oai")),
+            ("", vec![ant, ("SHELLY_API_KEY", "sh")], Some("sh")),
+            ("base_url = \"http://localhost:11434/v1\"", vec![ant], None),
+        ];
+        for (file, env, key) in cases {
+            let config = resolve(file, &env).unwrap();
+            assert_eq!(config.kind, ProviderKind::OpenAi, "{file} {env:?}");
+            assert_eq!(config.api_key.as_deref(), key, "{file} {env:?}");
+        }
+        assert!(resolve("provider = \"openai\"", &[ant]).is_err());
+    }
+
+    #[test]
+    fn empty_keys_fall_through_to_next_source() {
+        let key = |file: &str, env: &[(&str, &str)]| resolve(file, env).unwrap().api_key;
+
+        let blank_shelly = [("SHELLY_API_KEY", ""), ("OPENAI_API_KEY", "oai")];
+        assert_eq!(key("", &blank_shelly).as_deref(), Some("oai"));
+
+        let all_blank = [("SHELLY_API_KEY", " "), ("OPENAI_API_KEY", "")];
+        let file = "api_key = \"file\"";
+        assert_eq!(key(file, &all_blank).as_deref(), Some("file"));
+    }
+
+    #[test]
+    fn key_precedence_is_shelly_then_provider_then_file() {
+        let file = "provider = \"anthropic\"\napi_key = \"file\"";
+        let key = |env: &[(&str, &str)]| resolve(file, env).unwrap().api_key;
+
+        let both = [("SHELLY_API_KEY", "sh"), ("ANTHROPIC_API_KEY", "ant")];
+        assert_eq!(key(&both).as_deref(), Some("sh"));
+        assert_eq!(key(&[("ANTHROPIC_API_KEY", "ant")]).as_deref(), Some("ant"));
+        assert_eq!(key(&[("OPENAI_API_KEY", "oai")]).as_deref(), Some("file"));
+    }
+
+    #[test]
+    fn key_is_optional_only_with_custom_base_url() {
+        let file = "base_url = \"http://localhost:11434/v1\"\napi_key = \"YOUR_API_KEY_HERE\"";
+        assert_eq!(resolve(file, &[]).unwrap().api_key, None);
+
+        let error = resolve("", &[]).err().unwrap();
+        for expected in [
+            "SHELLY_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "config.toml",
+        ] {
+            assert!(error.contains(expected), "{error}");
+        }
+        assert!(resolve("provider = \"anthropic\"", &[]).is_err());
     }
 }

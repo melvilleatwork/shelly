@@ -13,9 +13,9 @@ cargo test
 
 ## Before opening a PR
 
-- `cargo fmt --check` passes
-- `cargo clippy -- -D warnings` is clean
-- `cargo test` passes
+- `cargo fmt --all -- --check` passes
+- `cargo clippy --all-targets --all-features -- -D warnings` is clean
+- `cargo test --all-features` passes
 - Add tests for new behavior where practical
 - Update `CHANGELOG.md` under **Unreleased**
 
