@@ -225,8 +225,8 @@ mod tests {
             ProviderKind::Anthropic.default_base_url(),
             "https://api.anthropic.com/v1"
         );
-        assert!(!ProviderKind::OpenAi.default_model().is_empty());
-        assert!(!ProviderKind::Anthropic.default_model().is_empty());
+        assert_ne!(ProviderKind::OpenAi.default_model(), "");
+        assert_ne!(ProviderKind::Anthropic.default_model(), "");
     }
 
     fn resolve(file: &str, env: &[(&str, &str)]) -> Result<Config, String> {
